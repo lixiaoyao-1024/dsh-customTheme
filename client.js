@@ -652,7 +652,12 @@ window.__ModuleLoader__.load({
       }
       return {
         bg: typeof saved.bg === 'string' && saved.bg !== '' ? saved.bg : 'builtin',
-        bgUrl: saved.bg === 'builtin:live' ? LIVE_IMAGE : DEFAULT_IMAGE,
+        bgUrl:
+          typeof saved.bg === 'string' && saved.bg !== '' && !saved.bg.startsWith('builtin')
+            ? API + 'file/' + encodeURIComponent(saved.bg)
+            : saved.bg === 'builtin:live'
+              ? LIVE_IMAGE
+              : DEFAULT_IMAGE,
         skinId: skin.id,
         alpha: typeof saved.alpha === 'number' ? clamp(saved.alpha, 0, 1) : skin.alpha,
         blur: typeof saved.blur === 'number' ? clamp(saved.blur, 0, 40) : skin.blur,
@@ -671,67 +676,79 @@ window.__ModuleLoader__.load({
     /* -------------------------------------------------------------- gallery */
 
     /**
-     * One IndexedDB store holds the uploaded pictures: full blob, a small
-     * thumbnail, the source name and the decoded pixel size. Nothing is
-     * uploaded anywhere, and deleting an entry frees the space.
+     * Wallpapers live in a real folder on disk, owned by the Host half:
+     * `<package>/wallpapers/`. The page reaches it with same-origin fetches
+     * (the desktop shell forwards them with its cookie), so nothing is stored
+     * in browser storage and the pictures survive clearing site data.
      */
-    function openDb() {
-      return new Promise((resolve, reject) => {
-        const request = window.indexedDB.open(DB_NAME, 1)
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: 'id' })
-        }
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error || new Error('indexeddb open failed'))
+    const API = '/dsh-my-theme/'
+
+    async function listWallpapers() {
+      const res = await fetch(API + 'list', { headers: { accept: 'application/json' } })
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      const data = await res.json()
+      return Array.isArray(data.items) ? data.items : []
+    }
+
+    async function uploadWallpaper(file) {
+      const res = await fetch(API + 'upload?name=' + encodeURIComponent(file.name || 'wallpaper'), {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+        body: file,
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
+      return data.item
     }
 
-    async function withStore(mode, run) {
-      const db = await openDb()
-      try {
-        return await new Promise((resolve, reject) => {
-          const tx = db.transaction(DB_STORE, mode)
-          const request = run(tx.objectStore(DB_STORE))
-          tx.oncomplete = () => resolve(request.result)
-          tx.onerror = () => reject(tx.error || new Error('indexeddb write failed'))
-          tx.onabort = () => reject(tx.error || new Error('indexeddb aborted'))
-        })
-      } finally {
-        db.close()
-      }
+    async function deleteWallpaper(id) {
+      const res = await fetch(API + 'delete?id=' + encodeURIComponent(id), { method: 'DELETE' })
+      if (!res.ok) throw new Error('HTTP ' + res.status)
     }
 
-    const gallery = {
-      all() {
-        return withStore('readonly', (store) => store.getAll())
-      },
-      get(id) {
-        return withStore('readonly', (store) => store.get(id))
-      },
-      put(record) {
-        return withStore('readwrite', (store) => store.put(record))
-      },
-      remove(id) {
-        return withStore('readwrite', (store) => store.delete(id))
-      },
-    }
-
-    /** Decode once: reject anything the browser cannot draw, and keep the true pixel size. */
-    async function describeImage(file) {
-      /* `from-image` keeps phone photos upright: the EXIF orientation is applied
-         before we measure or thumbnail, so a portrait shot never lands sideways. */
-      const bitmap = await window.createImageBitmap(file, { imageOrientation: 'from-image' })
-      const width = bitmap.width
-      const height = bitmap.height
-      const scale = Math.min(1, 512 / Math.max(width, height))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(width * scale))
-      canvas.height = Math.max(1, Math.round(height * scale))
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-      if (typeof bitmap.close === 'function') bitmap.close()
-      const thumb = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82))
-      return { width, height, thumb }
+    /**
+     * Poster frame plus mean luminance of a video, sampled once through a
+     * canvas. The poster keeps the desktop covered while the <video> element is
+     * hidden (collapsed sidebar) and feeds the readability guard.
+     */
+    const posterCache = new Map()
+    function videoPoster(url) {
+      const cached = posterCache.get(url)
+      if (cached !== undefined) return Promise.resolve(cached)
+      return new Promise((resolve) => {
+        const video = document.createElement('video')
+        video.muted = true
+        video.playsInline = true
+        video.preload = 'auto'
+        const settle = (value) => {
+          posterCache.set(url, value)
+          resolve(value)
+        }
+        video.onerror = () => settle({ poster: '', luma: 0.5 })
+        video.onloadeddata = () => {
+          try {
+            video.currentTime = Math.min(0.3, (video.duration || 1) / 3)
+          } catch (error) {
+            settle({ poster: '', luma: 0.5 })
+          }
+        }
+        video.onseeked = () => {
+          try {
+            const edge = 320
+            const scale = Math.min(1, edge / Math.max(video.videoWidth || edge, video.videoHeight || edge))
+            const canvas = document.createElement('canvas')
+            canvas.width = Math.max(1, Math.round((video.videoWidth || edge) * scale))
+            canvas.height = Math.max(1, Math.round((video.videoHeight || edge) * scale))
+            const context = canvas.getContext('2d')
+            context.drawImage(video, 0, 0, canvas.width, canvas.height)
+            const luma = lumaFromPixels(context.getImageData(0, 0, canvas.width, canvas.height).data)
+            settle({ poster: canvas.toDataURL('image/webp', 0.8), luma })
+          } catch (error) {
+            settle({ poster: '', luma: 0.5 })
+          }
+        }
+        video.src = url
+      })
     }
 
     /* ------------------------------------------------------- readability guard */
@@ -780,92 +797,6 @@ window.__ModuleLoader__.load({
         image.onerror = () => resolve(0.5)
         image.src = url
       })
-    }
-
-    /** Sample one frame of a video URL; used when a video is picked again later. */
-    function analyseVideoLuma(url) {
-      const cached = lumaCache.get(url)
-      if (cached !== undefined) return Promise.resolve(cached)
-      return new Promise((resolve) => {
-        const video = document.createElement('video')
-        video.muted = true
-        video.playsInline = true
-        video.preload = 'auto'
-        const done = (value) => {
-          lumaCache.set(url, value)
-          resolve(value)
-        }
-        video.onloadeddata = () => {
-          try {
-            video.currentTime = Math.min(0.3, (video.duration || 1) / 3)
-          } catch (error) {
-            done(0.5)
-          }
-        }
-        video.onseeked = () => {
-          try {
-            const edge = 32
-            const canvas = document.createElement('canvas')
-            canvas.width = edge
-            canvas.height = edge
-            const context = canvas.getContext('2d')
-            context.drawImage(video, 0, 0, edge, edge)
-            done(lumaFromPixels(context.getImageData(0, 0, edge, edge).data))
-          } catch (error) {
-            done(0.5)
-          }
-        }
-        video.onerror = () => done(0.5)
-        video.src = url
-      })
-    }
-
-    /**
-     * Decode a video far enough to learn its size, grab a poster frame and
-     * measure the luminance of that frame.
-     */
-    async function describeVideo(file) {
-      const url = URL.createObjectURL(file)
-      try {
-        const video = await new Promise((resolve, reject) => {
-          const element = document.createElement('video')
-          element.muted = true
-          element.playsInline = true
-          element.preload = 'auto'
-          element.onloadeddata = () => resolve(element)
-          element.onerror = () => reject(new Error('video decode failed'))
-          element.src = url
-        })
-        const width = video.videoWidth || 1280
-        const height = video.videoHeight || 720
-        await new Promise((resolve) => {
-          const settle = () => resolve()
-          video.onseeked = settle
-          setTimeout(settle, 1200)
-          try {
-            video.currentTime = Math.min(0.3, (video.duration || 1) / 3)
-          } catch (error) {
-            settle()
-          }
-        })
-        const scale = Math.min(1, 512 / Math.max(width, height, 1))
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.max(1, Math.round(width * scale))
-        canvas.height = Math.max(1, Math.round(height * scale))
-        const context = canvas.getContext('2d')
-        context.drawImage(video, 0, 0, canvas.width, canvas.height)
-        const thumb = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.8))
-        const luma = (() => {
-          try {
-            return lumaFromPixels(context.getImageData(0, 0, canvas.width, canvas.height).data)
-          } catch (error) {
-            return 0.5
-          }
-        })()
-        return { width, height, thumb, luma }
-      } finally {
-        URL.revokeObjectURL(url)
-      }
     }
 
     /** Scrim floor for one luminance; the user's own dim value still wins when higher. */
@@ -961,8 +892,6 @@ window.__ModuleLoader__.load({
       let saved = { ...state }
       let layer
       const listeners = new Set()
-      const urls = new Map()
-      const posters = new Map()
 
       const notify = () => {
         for (const listener of [...listeners]) {
@@ -1049,28 +978,6 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const urlFor = (record) => {
-        const cached = urls.get(record.id)
-        if (cached !== undefined) return cached
-        const url = URL.createObjectURL(record.blob)
-        urls.set(record.id, url)
-        return url
-      }
-
-      /**
-       * Poster frame of a video, kept as the static fallback under the video
-       * layer: while the sidebar (and therefore the video element) is hidden,
-       * the same frame still paints through `body::before`.
-       */
-      const posterFor = (record) => {
-        if (record.thumb === undefined || record.thumb === null) return ''
-        const cached = posters.get(record.id)
-        if (cached !== undefined) return cached
-        const url = URL.createObjectURL(record.thumb)
-        posters.set(record.id, url)
-        return url
-      }
-
       /**
        * Persisted shape of the look. Trial edits change `state` only; `saved`
        * moves when the user presses 应用, which is what makes 试穿 reversible.
@@ -1119,37 +1026,36 @@ window.__ModuleLoader__.load({
          * Show one stored picture. `keepWallpaper` restores the saved toggle at
          * boot; a user gesture always turns the wallpaper back on.
          */
-        async open(record, keepWallpaper) {
-          if (record !== undefined) {
-            const url = urlFor(record)
-            const video = record.kind === 'video'
-            engine.apply({
-              ...state,
-              bg: record.id,
-              bgUrl: url,
-              bgKind: video ? 'video' : 'image',
-              bgPoster: video ? posterFor(record) : '',
-              wallpaper: keepWallpaper === true ? state.wallpaper : true,
-              /* A video cannot be sampled by an <img>; its frame luminance was
-                 measured once at upload time and stored with the record. */
-              luma: video && typeof record.luma === 'number' ? record.luma : state.luma,
-            })
-            return true
+        /**
+         * Show one wallpaper. Built-ins pass their inlined data URL; files pass
+         * the Host URL. A video is sampled once for its poster and luminance.
+         */
+        async open(item, keepWallpaper) {
+          if (item === undefined || item === null || item.url === undefined) {
+            engine.apply({ ...state, bg: 'builtin', bgUrl: DEFAULT_IMAGE, bgKind: 'image', bgPoster: '' })
+            return false
           }
-          engine.apply({ ...state, bg: 'builtin', bgUrl: DEFAULT_IMAGE, bgKind: 'image' })
-          return false
+          const video = item.kind === 'video'
+          let poster = ''
+          let luma = state.luma
+          if (video) {
+            const still = await videoPoster(item.url)
+            poster = still.poster
+            luma = still.luma
+          }
+          engine.apply({
+            ...state,
+            bg: item.id,
+            bgUrl: item.url,
+            bgKind: video ? 'video' : 'image',
+            bgPoster: poster,
+            luma,
+            wallpaper: keepWallpaper === true ? state.wallpaper : true,
+          })
+          return true
         },
-        forget(id) {
-          const url = urls.get(id)
-          if (url !== undefined) {
-            URL.revokeObjectURL(url)
-            urls.delete(id)
-          }
-          const poster = posters.get(id)
-          if (poster !== undefined) {
-            URL.revokeObjectURL(poster)
-            posters.delete(id)
-          }
+        forget() {
+          /* Files are served by URL, so there is no per-id cache to release. */
         },
         subscribe(listener) {
           listeners.add(listener)
@@ -1161,18 +1067,19 @@ window.__ModuleLoader__.load({
           paint(state)
           notify()
           if (String(state.bg).startsWith('builtin') || state.bg === '') return
-          let record
+          let files
           try {
-            record = await gallery.get(state.bg)
+            files = await listWallpapers()
           } catch (error) {
-            record = undefined
-          }
-          if (record !== undefined && record.blob !== undefined) {
-            await engine.open(record, true)
+            /* The Host half is unavailable: keep the built-in wallpaper. */
             return
           }
-          /* The remembered picture is gone: fall back to the packaged one and
-             forget it, so the panel never shows a phantom trial. */
+          const found = files.find((file) => file.id === state.bg)
+          if (found !== undefined) {
+            await engine.open(found, true)
+            return
+          }
+          /* The remembered file is gone: fall back and remember that. */
           state = { ...state, bg: 'builtin', bgUrl: DEFAULT_IMAGE, bgKind: 'image', bgPoster: '' }
           saved = { ...state }
           writeSaved(state)
@@ -1186,10 +1093,6 @@ window.__ModuleLoader__.load({
             layer = undefined
           }
           clearFallback()
-          for (const url of urls.values()) URL.revokeObjectURL(url)
-          urls.clear()
-          for (const url of posters.values()) URL.revokeObjectURL(url)
-          posters.clear()
           if (document.body !== null) delete document.body.dataset.dmt
           const root = document.documentElement
           for (const name of ['--dmt-image', '--dmt-blur', '--dmt-dim', '--dmt-zoom', '--dmt-fit']) {
@@ -1353,9 +1256,6 @@ window.__ModuleLoader__.load({
     /** Engine and translator for the entry; filled by `apply` before the slot mounts. */
     let shared = { engine: undefined, tr: (key) => key }
 
-    /** Object URLs handed to <img> thumbnails; released on every refresh. */
-    const previewUrls = []
-
     function ThemeEntry(props) {
       const wide = props !== null && props !== undefined && props.wide === true
       const { engine, tr, compat } = shared
@@ -1379,37 +1279,20 @@ window.__ModuleLoader__.load({
       const dirty = engine.dirty()
 
       const refresh = useCallback(async () => {
-        let records = []
+        let files = []
         try {
-          records = await gallery.all()
+          files = await listWallpapers()
         } catch (err) {
           setItems([])
           setError(tr('errorList'))
           return []
         }
-        records.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-        for (const url of previewUrls) URL.revokeObjectURL(url)
-        previewUrls.length = 0
         const list = [
-          {
-            id: 'builtin',
-            name: tr('defaultBg'),
-            thumbUrl: DEFAULT_IMAGE,
-            url: DEFAULT_IMAGE,
-          },
-          {
-            id: 'builtin:live',
-            name: tr('liveBg'),
-            thumbUrl: LIVE_IMAGE,
-            url: LIVE_IMAGE,
-          },
+          { id: 'builtin', name: tr('defaultBg'), kind: 'image', url: DEFAULT_IMAGE },
+          { id: 'builtin:live', name: tr('liveBg'), kind: 'image', url: LIVE_IMAGE },
         ]
-        for (const record of records) {
-          const thumbUrl =
-            record.thumb !== undefined && record.thumb !== null ? URL.createObjectURL(record.thumb) : URL.createObjectURL(record.blob)
-          const url = URL.createObjectURL(record.blob)
-          previewUrls.push(thumbUrl, url)
-          list.push({ id: record.id, name: record.name || 'image', thumbUrl, url, record })
+        for (const file of files) {
+          list.push({ id: file.id, name: file.name, kind: file.kind === 'video' ? 'video' : 'image', size: file.size, url: file.url })
         }
         setItems(list)
         return list
@@ -1575,13 +1458,11 @@ window.__ModuleLoader__.load({
       }
 
       const downloadItem = (item) => {
-        if (String(item.id).startsWith('builtin') || item.record === undefined) return
-        const url = URL.createObjectURL(item.record.blob)
+        if (String(item.id).startsWith('builtin')) return
         const anchor = document.createElement('a')
-        anchor.href = url
-        anchor.download = item.record.name || 'background'
+        anchor.href = item.url
+        anchor.download = item.name || 'wallpaper'
         anchor.click()
-        setTimeout(() => URL.revokeObjectURL(url), 4000)
       }
 
       /** Two-step clear: no confirm dialog, the label itself asks for the second click. */
@@ -1594,13 +1475,12 @@ window.__ModuleLoader__.load({
         setConfirmClear(false)
         setBusy(true)
         try {
-          const records = await gallery.all()
-          for (const record of records) {
-            await gallery.remove(record.id)
-            engine.forget(record.id)
-          }
+          const files = await listWallpapers()
+          for (const file of files) await deleteWallpaper(file.id)
           await refresh()
-          if (!String(engine.get().bg).startsWith('builtin')) engine.apply({ ...engine.get(), bg: 'builtin', bgUrl: DEFAULT_IMAGE })
+          if (!String(engine.get().bg).startsWith('builtin')) {
+            engine.apply({ ...engine.get(), bg: 'builtin', bgUrl: DEFAULT_IMAGE, bgKind: 'image', bgPoster: '' })
+          }
         } catch (err) {
           setError(tr('errorDelete'))
         } finally {
@@ -1614,12 +1494,7 @@ window.__ModuleLoader__.load({
       }
 
       const pick = async (item) => {
-        if (item.id === 'builtin' || item.id === 'builtin:live') {
-          engine.apply({ ...engine.get(), bg: item.id, bgUrl: item.url, bgKind: 'image', bgPoster: '', wallpaper: true })
-          return
-        }
-        const record = item.record !== undefined ? item.record : await gallery.get(item.id)
-        if (record !== undefined && record.blob !== undefined) engine.open(record)
+        await engine.open(item)
       }
 
       const setFit = (fit) => engine.apply({ ...engine.get(), fit })
@@ -1638,23 +1513,9 @@ window.__ModuleLoader__.load({
         }
         setBusy(true)
         try {
-          const described = video ? await describeVideo(file) : await describeImage(file)
-          const record = {
-            id: 'bg-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
-            name: file.name || (video ? 'video' : 'image'),
-            type: file.type || '',
-            kind: video ? 'video' : 'image',
-            size: file.size,
-            width: described.width,
-            height: described.height,
-            createdAt: Date.now(),
-            blob: file,
-            thumb: described.thumb || undefined,
-            luma: typeof described.luma === 'number' ? described.luma : undefined,
-          }
-          await gallery.put(record)
+          const item = await uploadWallpaper(file)
           await refresh()
-          engine.open(record)
+          await engine.open({ ...item, kind: item.kind === 'video' ? 'video' : 'image' })
         } catch (err) {
           setError((video ? tr('errorVideo') : tr('errorUpload')) + String((err && err.message) || err))
         } finally {
@@ -1664,15 +1525,14 @@ window.__ModuleLoader__.load({
       }
 
       const removeItem = async (item) => {
-        if (item.id.startsWith('builtin')) return
+        if (String(item.id).startsWith('builtin')) return
         setBusy(true)
         setError('')
         try {
-          await gallery.remove(item.id)
-          engine.forget(item.id)
+          await deleteWallpaper(item.id)
           await refresh()
           if (engine.get().bg === item.id) {
-            engine.apply({ ...engine.get(), bg: 'builtin', bgUrl: DEFAULT_IMAGE })
+            engine.apply({ ...engine.get(), bg: 'builtin', bgUrl: DEFAULT_IMAGE, bgKind: 'image', bgPoster: '' })
           }
         } catch (err) {
           setError(tr('errorDelete'))
@@ -1682,7 +1542,7 @@ window.__ModuleLoader__.load({
       }
 
       const list = items === null ? [] : items
-      const totalSize = list.reduce((sum, item) => sum + ((item.record && item.record.size) || 0), 0)
+      const totalSize = list.reduce((sum, item) => sum + (typeof item.size === 'number' ? item.size : 0), 0)
 
       return h(
         'div',
@@ -1951,9 +1811,9 @@ window.__ModuleLoader__.load({
                             title: item.name,
                             onClick: () => pick(item),
                           },
-                          h('img', { src: item.thumbUrl, alt: '', loading: 'lazy', draggable: false }),
+                          h('img', { src: item.url, alt: '', loading: 'lazy', draggable: false, decoding: 'async' }),
                         ),
-                        item.record !== undefined && item.record.kind === 'video'
+                        item.kind === 'video'
                           ? h('span', { className: 'dmt-kind' }, '▶ 视频')
                           : null,
                         String(item.id).startsWith('builtin')
@@ -1979,7 +1839,7 @@ window.__ModuleLoader__.load({
                               {
                                 type: 'button',
                                 className: 'dmt-dl',
-                                title: tr('download') + (item.record && item.record.size ? ' · ' + formatBytes(item.record.size) : ''),
+                                title: tr('download') + (item.size ? ' · ' + formatBytes(item.size) : ''),
                                 'aria-label': tr('download'),
                                 onClick: (event) => {
                                   event.stopPropagation()

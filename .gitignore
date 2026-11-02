@@ -1,9 +1,11 @@
-# scratch output of the local tools
-.dev/wallpapers/
-.dev/tmp-*
-*.log
+# local dev tooling and scratch output — not part of the published plugin
+.dev/
+
+# user wallpapers written by the Host half at runtime — never commit these
+wallpapers/
 
 # dependencies / editor noise
 node_modules/
+*.log
 .DS_Store
 Thumbs.db
