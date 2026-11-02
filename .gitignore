@@ -1,0 +1,9 @@
+# scratch output of the local tools
+.dev/wallpapers/
+.dev/tmp-*
+*.log
+
+# dependencies / editor noise
+node_modules/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,3 @@
+- insert:
+    - id: my-theme
+      name: '@local/dsh-my-theme'

@@ -1,0 +1,49 @@
+{
+  "name": "@local/dsh-my-theme",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wallpaper, video backgrounds, glass/transparent surfaces and portable JSON skins for the DeepSeek Harness UI (desktop client and Web GUI).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lixiaoyao-1024/dsh-customTheme.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "theme",
+    "wallpaper",
+    "glassmorphism"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "assets/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}
