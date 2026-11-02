@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-my-theme",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Wallpaper, video backgrounds, glass/transparent surfaces and portable JSON skins for the DeepSeek Harness UI (desktop client and Web GUI).",

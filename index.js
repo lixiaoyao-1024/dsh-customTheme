@@ -259,27 +259,10 @@ async function handle(req, res) {
   return writeJson(res, 404, { error: 'not found' })
 }
 
-/**
- * Diagnostic breadcrumbs. The wallpaper routes are the only way the page can
- * tell "Host half did not load" from "route not reachable", so a readiness
- * marker and a per-request log are written next to the plugin.
- */
-const READY_FILE = fileURLToPath(new URL('./.host-ready.json', import.meta.url))
-const LOG_FILE = fileURLToPath(new URL('./.host-requests.log', import.meta.url))
-
-async function breadcrumb(file, line) {
-  try {
-    await fsp.appendFile(file, line + '\n', 'utf8')
-  } catch (error) {
-    /* diagnostics must never break the plugin */
-  }
-}
-
 const ROUTE = {
   kind: 'prefix',
   path: ROUTE_PATH,
   handler: (req, res) => {
-    void breadcrumb(LOG_FILE, new Date().toISOString() + ' ' + (req.method || 'GET') + ' ' + (req.url || ''))
     handle(req, res).catch((error) => {
       if (!res.headersSent) writeJson(res, 500, { error: String((error && error.message) || error) })
       else res.destroy()
@@ -292,20 +275,7 @@ const ROUTE = {
  * waits for the service instead of reading it once at apply time.
  */
 export function apply(ctx) {
-  let done = false
-  try {
-    ctx.inject(['webServer'], (webCtx) => {
-      try {
-        webCtx.effect(() => webCtx.webServer.register(ROUTE), 'my-theme: wallpaper routes')
-        done = true
-        void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), registered: true, path: ROUTE_PATH }))
-      } catch (error) {
-        void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), registered: false, reason: String(error && error.message) }))
-      }
-    })
-  } catch (error) {
-    void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), injectFailed: true, reason: String(error && error.message) }))
-    return
-  }
-  void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), injectCalled: true, done }))
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(() => webCtx.webServer.register(ROUTE), 'my-theme: wallpaper routes')
+  })
 }
