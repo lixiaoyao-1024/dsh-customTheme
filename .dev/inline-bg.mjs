@@ -1,7 +1,7 @@
 // Inlines the packaged wallpapers into client.js as data URLs so no HTTP route
 // (and no auth) is needed. Two slots:
-//   bg.webp       -> DEFAULT_IMAGE (the active default, currently the animated aurora)
-//   bg-anime.webp -> ANIME_IMAGE   (the original static art, offered as a built-in choice)
+//   bg.webp      -> DEFAULT_IMAGE (the default wallpaper, the artwork in this repo)
+//   bg-live.webp -> LIVE_IMAGE    (generated animated aurora, offered as a built-in choice)
 // Run after replacing either file:  node .dev/inline-bg.mjs
 import { readFile, writeFile } from 'node:fs/promises'
 
@@ -9,7 +9,7 @@ const target = new URL('../client.js', import.meta.url)
 
 const SLOTS = [
   { marker: 'inline-bg', file: new URL('../assets/backgrounds/bg.webp', import.meta.url), variable: 'DEFAULT_IMAGE' },
-  { marker: 'inline-anime', file: new URL('../assets/backgrounds/bg-anime.webp', import.meta.url), variable: 'ANIME_IMAGE' },
+  { marker: 'inline-live', file: new URL('../assets/backgrounds/bg-live.webp', import.meta.url), variable: 'LIVE_IMAGE' },
 ]
 
 const chunksOf = (url) => {

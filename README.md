@@ -4,8 +4,9 @@
 换壁纸、换质感的主题插件：**背景图 / 视频 / 动图**，**毛玻璃 / 透明 / 纯色**面板，
 皮肤是一份可导入导出的 JSON。只改外观，不改布局、不改会话、不碰官方代码。
 
-![动态极光壁纸](docs/preview-aurora.jpg)
+![默认壁纸](docs/preview-default.jpg)
 
+> 默认壁纸就是仓库里的 `assets/backgrounds/bg.webp`（2560×1440）。
 > 状态：v1.0.0 首发。在 DSH 0.2.1-rc.5（Windows 桌面端）上开发与验证。
 
 ---
@@ -14,7 +15,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| **壁纸** | 默认内置一张动态极光（1024×576 无缝循环），也可上传自己的图片 / GIF / 视频 |
+| **壁纸** | 默认用仓库自带的 `bg.webp`；也可上传自己的图片 / GIF / 视频，另内置一张动态极光可切换 |
 | **四种质感** | 二次元 · 毛玻璃 · 透明 · 纯色，参数可继续用滑块微调 |
 | **皮肤即数据** | 皮肤 = 一份 JSON（配方 + 双色调），支持导入 / 导出 / 删除，发给别人就能用 |
 | **试穿再应用** | 所有改动先预览，点「应用」才落盘；关掉面板自动还原，随便试 |
@@ -91,6 +92,11 @@ dsh plugin --profile web remove @local/dsh-my-theme
 
 ## 动态背景
 
+默认壁纸是静态的 `bg.webp`。想要动起来，图库里还有一张**内置动态极光**
+（1024×576、5 秒无缝循环、53 KB 动画 WebP），点一下再「应用」即可；也可以换成下面的视频 / 动图。
+
+![动态极光（可选内置）](docs/preview-aurora.jpg)
+
 | 类型 | 格式 | 上限 | 实现 |
 | --- | --- | --- | --- |
 | 视频 | mp4 / webm / ogv / mov | 160 MB | 独立 `<video>` 图层，静音循环，`object-fit` 跟随「图片填充」 |
@@ -140,5 +146,6 @@ node .dev/probe.cjs <bundle.js>     # 从 app.asar 抽出的 bundle 查它用了
 
 代码以 MIT 许可发布，见 [LICENSE](LICENSE)。
 
-默认动态极光壁纸由 `.dev/make-wallpaper.py` 程序化生成，无第三方素材；
-`assets/backgrounds/bg-anime.webp` 为仓库作者提供的个人素材，随本仓库一并分发。
+默认壁纸 `assets/backgrounds/bg.webp` 为仓库作者提供的个人素材（原图带「@次元小镇」水印），
+随本仓库一并分发；若要商用或再分发，请先确认原作者授权。
+内置动态极光 `assets/backgrounds/bg-live.webp` 由 `.dev/make-wallpaper.py` 程序化生成，无第三方素材。
