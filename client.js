@@ -719,7 +719,7 @@ window.__ModuleLoader__.load({
         const video = document.createElement('video')
         video.muted = true
         video.playsInline = true
-        video.preload = 'auto'
+        video.preload = 'metadata'
         const settle = (value) => {
           posterCache.set(url, value)
           resolve(value)
@@ -1162,7 +1162,7 @@ window.__ModuleLoader__.load({
       '.dmt-gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}',
       '.dmt-thumbWrap{position:relative;min-width:0}',
       '.dmt-thumb{display:block;width:100%;padding:0;aspect-ratio:16/10;border:.5px solid var(--dsw-alias-border-l2);border-radius:9px;overflow:hidden;background:var(--dsw-alias-bg-layer-2);cursor:pointer}',
-      '.dmt-thumb img{display:block;width:100%;height:100%;object-fit:cover}',
+      '.dmt-thumb .dmt-thumbMedia{display:block;width:100%;height:100%;object-fit:cover;background:rgba(0,0,0,.35);pointer-events:none}',
       '.dmt-thumbWrap[data-active="true"] .dmt-thumb{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 1px var(--dsw-alias-state-business-primary)}',
       '.dmt-del{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:6px;border:none;background:rgba(0,0,0,.66);color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity .12s ease;padding:0}',
       '.dmt-thumbWrap:hover .dmt-del,.dmt-del:focus-visible{opacity:1}',
@@ -1811,7 +1811,23 @@ window.__ModuleLoader__.load({
                             title: item.name,
                             onClick: () => pick(item),
                           },
-                          h('img', { src: item.url, alt: '', loading: 'lazy', draggable: false, decoding: 'async' }),
+                          item.kind === 'video'
+                            ? h('video', {
+                                className: 'dmt-thumbMedia',
+                                src: item.url + '#t=0.3',
+                                preload: 'metadata',
+                                muted: true,
+                                playsInline: true,
+                                'aria-hidden': 'true',
+                              })
+                            : h('img', {
+                                className: 'dmt-thumbMedia',
+                                src: item.url,
+                                alt: '',
+                                loading: 'lazy',
+                                draggable: false,
+                                decoding: 'async',
+                              }),
                         ),
                         item.kind === 'video'
                           ? h('span', { className: 'dmt-kind' }, '▶ 视频')

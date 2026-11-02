@@ -87,6 +87,29 @@ function writeJson(res, status, body) {
   res.end(text)
 }
 
+/** Parse one `bytes=` range against a known size; undefined means "serve all". */
+function parseRange(header, size) {
+  if (typeof header !== 'string') return undefined
+  const match = /^bytes=(\d*)-(\d*)$/u.exec(header.trim())
+  if (match === null) return undefined
+  let start = match[1] === '' ? undefined : Number(match[1])
+  let end = match[2] === '' ? undefined : Number(match[2])
+  if (start === undefined && end === undefined) return { invalid: true }
+  if (start === undefined) {
+    /* suffix range: last N bytes */
+    start = Math.max(0, size - end)
+    end = size - 1
+  } else if (end === undefined || end >= size) {
+    end = size - 1
+  }
+  if (start > end || start >= size) return { invalid: true }
+  return { start, end }
+}
+
+/**
+ * Serve one stored file, honouring `Range` requests: video thumbnails and
+ * seeking both depend on partial responses instead of full downloads.
+ */
 function sendFile(req, res, file) {
   const ext = extname(file).toLowerCase()
   const type = IMAGE_TYPES.get(ext) || VIDEO_TYPES.get(ext)
@@ -94,15 +117,33 @@ function sendFile(req, res, file) {
   return fsp.stat(file).then(
     (stat) => {
       if (!stat.isFile()) return writeJson(res, 404, { error: 'not found' })
-      res.writeHead(200, {
+      const size = stat.size
+      const range = parseRange(req.headers.range, size)
+      if (range !== undefined && range.invalid === true) {
+        res.writeHead(416, { 'content-range': 'bytes */' + size, 'cache-control': 'no-store' })
+        return res.end()
+      }
+      const headers = {
         'content-type': type,
-        'content-length': stat.size,
         'cache-control': 'private, max-age=86400',
+        'accept-ranges': 'bytes',
+      }
+      if (range === undefined) {
+        res.writeHead(200, { ...headers, 'content-length': size })
+        if (req.method === 'HEAD') return res.end()
+        const stream = createReadStream(file)
+        stream.on('error', () => res.destroy())
+        return stream.pipe(res)
+      }
+      res.writeHead(206, {
+        ...headers,
+        'content-length': range.end - range.start + 1,
+        'content-range': 'bytes ' + range.start + '-' + range.end + '/' + size,
       })
       if (req.method === 'HEAD') return res.end()
-      const stream = createReadStream(file)
+      const stream = createReadStream(file, { start: range.start, end: range.end })
       stream.on('error', () => res.destroy())
-      stream.pipe(res)
+      return stream.pipe(res)
     },
     () => writeJson(res, 404, { error: 'not found' }),
   )
