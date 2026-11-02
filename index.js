@@ -14,15 +14,31 @@
  *   POST   upload?name=<n>   -> stores the request body, answers { item }
  *   DELETE delete?id=<name>  -> removes one file
  */
-import { createReadStream, createWriteStream, promises as fsp } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, promises as fsp } from 'node:fs'
 import { extname, join, basename } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 /* URLs use the trailing slash, but the route table builds `${prefix}/` itself,
    so the registered path must not end with one. */
 const PREFIX = '/dsh-my-theme/'
 const ROUTE_PATH = '/dsh-my-theme'
-const STORE_DIR = fileURLToPath(new URL('./wallpapers/', import.meta.url))
+const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
+/* A git checkout keeps its wallpapers beside the code; an installed copy lives
+   under node_modules and is replaced on every update, so those go to the DSH
+   home instead. DSH_MY_THEME_WALLPAPERS overrides both. */
+const HOME_STORE_DIR = join(homedir(), '.dsh', 'my-theme', 'wallpapers')
+const CHECKOUT_STORE_DIR = join(PACKAGE_DIR, 'wallpapers')
+
+let storeDir
+/** Resolve once: checkout folder when this is a clone, else the DSH home. */
+function resolveStoreDir() {
+  if (storeDir !== undefined) return storeDir
+  const override = process.env.DSH_MY_THEME_WALLPAPERS
+  if (typeof override === 'string' && override !== '') storeDir = override
+  else storeDir = existsSync(join(PACKAGE_DIR, '.git')) ? CHECKOUT_STORE_DIR : HOME_STORE_DIR
+  return storeDir
+}
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024
 const MAX_VIDEO_BYTES = 160 * 1024 * 1024
 
@@ -74,7 +90,7 @@ function storeFile(id) {
   if (name !== String(id) || name === '.' || name === '..') return undefined
   const ext = extname(name).toLowerCase()
   if (!IMAGE_TYPES.has(ext) && !VIDEO_TYPES.has(ext)) return undefined
-  return join(STORE_DIR, name)
+  return join(resolveStoreDir(), name)
 }
 
 function writeJson(res, status, body) {
@@ -150,12 +166,12 @@ function sendFile(req, res, file) {
 }
 
 async function listItems() {
-  await fsp.mkdir(STORE_DIR, { recursive: true })
-  const dirents = await fsp.readdir(STORE_DIR, { withFileTypes: true })
+  await fsp.mkdir(resolveStoreDir(), { recursive: true })
+  const dirents = await fsp.readdir(resolveStoreDir(), { withFileTypes: true })
   const items = []
   for (const dirent of dirents) {
     if (!dirent.isFile()) continue
-    const file = join(STORE_DIR, dirent.name)
+    const file = join(resolveStoreDir(), dirent.name)
     const ext = extname(file).toLowerCase()
     const kind = IMAGE_TYPES.has(ext) ? 'image' : VIDEO_TYPES.has(ext) ? 'video' : undefined
     if (kind === undefined) continue
@@ -204,7 +220,7 @@ async function handle(req, res) {
   const method = req.method || 'GET'
 
   if (method === 'GET' && path === PREFIX + 'list') {
-    return writeJson(res, 200, { items: await listItems(), dir: STORE_DIR })
+    return writeJson(res, 200, { items: await listItems(), dir: resolveStoreDir() })
   }
 
   if ((method === 'GET' || method === 'HEAD') && path.startsWith(PREFIX + 'file/')) {
@@ -217,10 +233,10 @@ async function handle(req, res) {
   if (method === 'POST' && path === PREFIX + 'upload') {
     /* Stream to a temp file first, then identify it: the body can be 160 MB,
        so nothing is buffered in memory and a rejected file is unlinked. */
-    await fsp.mkdir(STORE_DIR, { recursive: true })
+    await fsp.mkdir(resolveStoreDir(), { recursive: true })
     const stamp = Date.now().toString(36)
     const stem = safeStem(url.searchParams.get('name'))
-    const temp = join(STORE_DIR, stamp + '-' + stem + '.part')
+    const temp = join(resolveStoreDir(), stamp + '-' + stem + '.part')
     let size
     try {
       size = await receive(req, MAX_VIDEO_BYTES, temp)
@@ -242,7 +258,7 @@ async function handle(req, res) {
       return writeJson(res, 413, { error: 'image larger than 32 MiB' })
     }
     const name = stamp + '-' + stem + sniffed.ext
-    await fsp.rename(temp, join(STORE_DIR, name))
+    await fsp.rename(temp, join(resolveStoreDir(), name))
     return writeJson(res, 200, {
       item: { id: name, name, kind: sniffed.kind, size, mtime: Date.now(), url: PREFIX + 'file/' + encodeURIComponent(name) },
     })

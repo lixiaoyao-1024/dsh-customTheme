@@ -26,26 +26,43 @@
 
 ## 安装
 
-需要已安装 DSH 且 `dsh web` 能正常启动。
+需要已安装 DSH，且 `dsh web` 能正常启动。
 
-### 本地目录（当前唯一方式）
+### 从 GitHub 安装（推荐）
+
+```powershell
+dsh plugin --profile web add github:lixiaoyao-1024/dsh-customTheme
+```
+
+等价的写法还有 `git+https://github.com/lixiaoyao-1024/dsh-customTheme.git` 或仓库的 https 地址。
+装完**重启 `dsh web`**（前端 bundle 在启动时组装），侧栏底部、设置按钮上方会出现一个调色盘图标。
+
+图形界面也可以：**设置 → 插件 → 安装插件**，粘贴上面的 GitHub 地址。
+
+### 从本地目录安装（改代码时用）
 
 ```powershell
 git clone https://github.com/lixiaoyao-1024/dsh-customTheme.git
 dsh plugin --profile web add link:<克隆下来的绝对路径>
 ```
 
-或者用图形界面：**设置 → 插件 → 安装本地插件**，选这个目录。
+link 安装改代码即时生效，适合自己开发；从 GitHub 安装的是一份拷贝，更新插件要重新执行一次安装命令。
 
-安装后**重启 `dsh web`**（前端 bundle 在启动时组装）。侧栏底部、设置按钮上方会出现一个调色盘图标。
-
-卸载：
+### 卸载
 
 ```powershell
 dsh plugin --profile web remove @local/dsh-my-theme
 ```
 
-> 包名保持 `@local/dsh-my-theme`：插件以 link 方式装进 profile，改包名会让已安装的入口失联。
+> 包名保持 `@local/dsh-my-theme`，改名会让已安装的入口失联。
+
+### 壁纸目录在哪
+
+- **git clone / link 安装**：壁纸存在仓库目录下的 `wallpapers/`。
+- **从 GitHub 安装**：插件本身被拷进 profile 的 `node_modules`，更新会覆盖，所以壁纸改存
+  `%USERPROFILE%\\.dsh\\my-theme\\wallpapers\\`，不随插件更新丢失。
+- 想固定到自己的目录：设置环境变量 `DSH_MY_THEME_WALLPAPERS` 指向任意文件夹。
+- 面板的图库底部会显示当前生效的张数与占用；`GET /dsh-my-theme/list` 的返回里也带 `dir` 字段。
 
 ## 使用
 
@@ -64,24 +81,21 @@ dsh plugin --profile web remove @local/dsh-my-theme
 
 ## 壁纸存在哪
 
-上传的图片 / GIF / 视频全部写到插件的 `wallpapers/` 目录，不是浏览器存储：
+上传的图片 / GIF / 视频都是磁盘上的普通文件，不是浏览器存储：
 
-```
-<插件目录>/
-├── wallpapers/          ← 你的壁纸（运行时自动创建，已 gitignore）
-├── assets/backgrounds/  ← 内置壁纸（bg.webp / bg-live.webp）
-├── client.js
-└── ...
-```
+| 安装方式 | 目录 |
+| --- | --- |
+| git clone / `link:` 安装 | `<仓库目录>\\wallpapers\\`（已 gitignore） |
+| `dsh plugin add github:...` 安装 | `%USERPROFILE%\\.dsh\\my-theme\\wallpapers\\` |
+| 自定义 | 环境变量 `DSH_MY_THEME_WALLPAPERS` |
 
-- 这些是**普通文件**：可以直接拖进来（刷新后出现在图库）、备份、用别的软件打开。
-- 目录已加入 `.gitignore`，不会提交，`git pull` 也不会覆盖你的图。
-- 清浏览器数据、换端口、换浏览器都不影响；重装插件只要保留这个目录即可。
+- 普通文件：可以直接拖进来（刷新后出现在图库）、备份、用别的软件打开。
+- 清浏览器数据、换端口、换浏览器都不影响；更新插件也不会丢（安装版刻意放在 DSH 目录而不是 `node_modules`）。
 - 图库里点删除 = 真的从磁盘删掉。
 
 ```powershell
 # 想看/管理这些文件
-explorer <插件目录>\wallpapers
+explorer "$env:USERPROFILE\.dsh\my-theme\wallpapers"
 ```
 
 ## 皮肤格式
