@@ -18,7 +18,10 @@ import { createReadStream, createWriteStream, promises as fsp } from 'node:fs'
 import { extname, join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+/* URLs use the trailing slash, but the route table builds `${prefix}/` itself,
+   so the registered path must not end with one. */
 const PREFIX = '/dsh-my-theme/'
+const ROUTE_PATH = '/dsh-my-theme'
 const STORE_DIR = fileURLToPath(new URL('./wallpapers/', import.meta.url))
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024
 const MAX_VIDEO_BYTES = 160 * 1024 * 1024
@@ -215,25 +218,53 @@ async function handle(req, res) {
   return writeJson(res, 404, { error: 'not found' })
 }
 
-/** Host dependencies: the route tree needs the browser HTTP carrier. */
-export const inject = ['webServer']
+/**
+ * Diagnostic breadcrumbs. The wallpaper routes are the only way the page can
+ * tell "Host half did not load" from "route not reachable", so a readiness
+ * marker and a per-request log are written next to the plugin.
+ */
+const READY_FILE = fileURLToPath(new URL('./.host-ready.json', import.meta.url))
+const LOG_FILE = fileURLToPath(new URL('./.host-requests.log', import.meta.url))
 
-/** Host plugin body: register the wallpaper route tree. */
+async function breadcrumb(file, line) {
+  try {
+    await fsp.appendFile(file, line + '\n', 'utf8')
+  } catch (error) {
+    /* diagnostics must never break the plugin */
+  }
+}
+
+const ROUTE = {
+  kind: 'prefix',
+  path: ROUTE_PATH,
+  handler: (req, res) => {
+    void breadcrumb(LOG_FILE, new Date().toISOString() + ' ' + (req.method || 'GET') + ' ' + (req.url || ''))
+    handle(req, res).catch((error) => {
+      if (!res.headersSent) writeJson(res, 500, { error: String((error && error.message) || error) })
+      else res.destroy()
+    })
+  },
+}
+
+/**
+ * Host plugin body. The web server may mount after this plugin, so registration
+ * waits for the service instead of reading it once at apply time.
+ */
 export function apply(ctx) {
-  const server = ctx.get('webServer')
-  if (server === undefined) return
-  ctx.effect(
-    () =>
-      server.register({
-        kind: 'prefix',
-        path: PREFIX,
-        handler: (req, res) => {
-          handle(req, res).catch((error) => {
-            if (!res.headersSent) writeJson(res, 500, { error: String((error && error.message) || error) })
-            else res.destroy()
-          })
-        },
-      }),
-    'my-theme: wallpaper routes',
-  )
+  let done = false
+  try {
+    ctx.inject(['webServer'], (webCtx) => {
+      try {
+        webCtx.effect(() => webCtx.webServer.register(ROUTE), 'my-theme: wallpaper routes')
+        done = true
+        void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), registered: true, path: ROUTE_PATH }))
+      } catch (error) {
+        void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), registered: false, reason: String(error && error.message) }))
+      }
+    })
+  } catch (error) {
+    void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), injectFailed: true, reason: String(error && error.message) }))
+    return
+  }
+  void breadcrumb(READY_FILE, JSON.stringify({ at: new Date().toISOString(), injectCalled: true, done }))
 }

@@ -4,6 +4,10 @@
 # user wallpapers written by the Host half at runtime — never commit these
 wallpapers/
 
+# host diagnostics written at runtime
+.host-ready.json
+.host-requests.log
+
 # dependencies / editor noise
 node_modules/
 *.log

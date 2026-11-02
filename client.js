@@ -1284,7 +1284,7 @@ window.__ModuleLoader__.load({
           files = await listWallpapers()
         } catch (err) {
           setItems([])
-          setError(tr('errorList'))
+          setError(tr('errorList') + ' · ' + String((err && err.message) || err))
           return []
         }
         const list = [
